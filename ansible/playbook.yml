@@ -1,0 +1,35 @@
+---
+- name: Install CachyOS recovery tooling
+  hosts: localhost
+  become: true
+  vars:
+    install_dir: /usr/local/bin
+    script_src: "{{ playbook_dir }}/../scripts/list-snapshots.sh"
+    script_dest: "{{ install_dir }}/cachyos-list-snapshots"
+
+  tasks:
+    - name: Ensure install directory exists
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Deploy list-snapshots script
+      ansible.builtin.copy:
+        src: "{{ script_src }}"
+        dest: "{{ script_dest }}"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Verify required tools are installed
+      ansible.builtin.package:
+        name:
+          - cryptsetup
+          - btrfs-progs
+          - util-linux
+        state: present
+
+    - name: Show invocation hint
+      ansible.builtin.debug:
+        msg: "Rode com: sudo {{ script_dest | basename }}"
