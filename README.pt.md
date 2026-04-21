@@ -23,46 +23,42 @@ sudo cachyos-list-snapshots
 
 ## Fluxo completo de recovery (só via live USB)
 
+Só um script é necessário: `recover.sh`. Ele lista as snapshots pra você e depois guia o rollback.
+
 ```sh
 # 1. Boot pelo live USB do CachyOS. Clona ou copia este repo pro live.
 
-# 2. Descobre qual snapshot você quer restaurar:
-sudo bash scripts/list-snapshots.sh
+# 2. Roda o rollback guiado:
+sudo bash scripts/recover.sh
 ```
 
-Saída esperada:
+O script imprime a tabela de snapshots e pergunta:
 
 ```
-LUKS device: /dev/nvme0n1p2
-Snapshots at: /mnt/cachyos-snaps-ro/@/.snapshots
-
 NUM  DATE                 TYPE    CLEANUP   DESCRIPTION
 1    2026-04-20 14:30:12  single  number    first root
 2    2026-04-20 15:17:42  pre     number    pacman -S docker
 3    2026-04-20 15:17:45  post    number    pacman -S docker
 ...
-```
 
-Anota o `NUM` da snapshot que você quer (ex: `2`).
-
-```sh
-# 3. Roda o rollback guiado:
-sudo bash scripts/recover.sh
-```
-
-O `recover.sh` vai listar as snapshots de novo e perguntar:
-
-```
-Snapshot number to restore: 2         ← digita o NUM do passo 2
+Snapshot number to restore: 2
 Confirm? type the snapshot number again: 2
 ```
 
-Ele faz o rollback, monta o chroot e mostra uma MOTD com os comandos pra regenerar initramfs/UKI e re-assinar com sbctl. Roda na ordem e depois `exit`.
+Depois faz o rollback, monta o chroot e mostra uma MOTD com os comandos pra regenerar initramfs/UKI e re-assinar com sbctl. Roda na ordem e depois `exit`.
 
 ```sh
-# 4. Reboot no sistema restaurado.
+# 3. Reboot no sistema restaurado.
 reboot
 ```
+
+### Quando usar o `list-snapshots.sh`
+
+O `list-snapshots.sh` é um **preview read-only opcional** — use quando:
+
+- Só quer inspecionar as snapshots (sem intenção de rollback).
+- Está rodando no sistema vivo (auditoria de snapshots existentes).
+- Quer um primeiro olhar mais seguro: ele monta `subvolid=5` como **read-only** e nunca abre o LUKS em modo escrita.
 
 ### O que o `recover.sh` faz por dentro
 
