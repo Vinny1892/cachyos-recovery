@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Lista snapshots Btrfs de uma instalação CachyOS com LUKS.
-# Funciona tanto em live USB quanto no sistema rodando.
-# Leitura apenas — não modifica nada.
+# Lists Btrfs snapshots from a CachyOS install with LUKS.
+# Works on a live USB or the running system. Read-only — changes nothing.
 
 set -euo pipefail
 
@@ -20,10 +19,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { echo "ERRO: $*" >&2; exit 1; }
+die() { echo "ERROR: $*" >&2; exit 1; }
 
 require_root() {
-    [[ $EUID -eq 0 ]] || die "precisa rodar como root (sudo)."
+    [[ $EUID -eq 0 ]] || die "must run as root (use sudo)."
 }
 
 find_luks_device() {
@@ -33,17 +32,17 @@ find_luks_device() {
     done < <(lsblk -ndo PATH,FSTYPE | awk '$2=="crypto_LUKS" {print $1}')
 
     case ${#devs[@]} in
-        0) die "nenhuma partição crypto_LUKS encontrada." ;;
+        0) die "no crypto_LUKS partition found." ;;
         1) echo "${devs[0]}" ;;
         *)
-            echo "Múltiplas partições LUKS:" >&2
+            echo "Multiple LUKS partitions found:" >&2
             local i=0
             for d in "${devs[@]}"; do
                 echo "  [$i] $d" >&2
                 ((i++)) || true
             done
-            read -rp "Índice: " idx
-            [[ "$idx" =~ ^[0-9]+$ ]] && (( idx < ${#devs[@]} )) || die "índice inválido."
+            read -rp "Index: " idx
+            [[ "$idx" =~ ^[0-9]+$ ]] && (( idx < ${#devs[@]} )) || die "invalid index."
             echo "${devs[$idx]}"
             ;;
     esac
@@ -51,7 +50,7 @@ find_luks_device() {
 
 reuse_or_open_luks() {
     local dev="$1"
-    # Se já está aberto por outro mapper, reusa
+    # If already open under some other mapper, reuse it
     for m in /dev/mapper/*; do
         [[ -b "$m" ]] || continue
         local name backing
@@ -60,7 +59,7 @@ reuse_or_open_luks() {
         if [[ "$backing" == "$dev" ]]; then
             LUKS_MAPPER="$name"
             LUKS_OPENED_BY_US="no"
-            echo "LUKS já aberto como /dev/mapper/$LUKS_MAPPER" >&2
+            echo "LUKS already open as /dev/mapper/$LUKS_MAPPER" >&2
             return
         fi
     done
@@ -81,7 +80,7 @@ find_snapshots_dir() {
             return
         fi
     done
-    die "diretório .snapshots não encontrado na raiz do Btrfs."
+    die ".snapshots directory not found on the Btrfs root."
 }
 
 extract_tag() {
@@ -106,7 +105,7 @@ list_snapshots() {
     done
 
     if [[ ${#rows[@]} -eq 0 ]]; then
-        echo "Nenhum snapshot encontrado em $dir"
+        echo "No snapshots found under $dir"
         return
     fi
 
@@ -124,7 +123,7 @@ main() {
     reuse_or_open_luks "$luks_dev"
     mount_btrfs_ro
     snap_dir=$(find_snapshots_dir)
-    echo "Snapshots em: $snap_dir"
+    echo "Snapshots at: $snap_dir"
     echo
     list_snapshots "$snap_dir"
 }

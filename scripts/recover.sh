@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Guia recuperação do CachyOS: rollback pra uma snapshot Btrfs e regenera boot.
-# Use SOMENTE a partir de live USB. Recusa rodar se estiver no próprio sistema.
+# Guided CachyOS recovery: rollback to a Btrfs snapshot and regenerate boot.
+# Live-USB ONLY. Refuses to run on the target system itself.
 #
-# Fluxo:
-#   1. Detecta partição LUKS, pede passphrase (ou reusa mapper aberto).
-#   2. Monta btrfs em subvolid=5 (read-write).
-#   3. Lista snapshots; você escolhe o número.
-#   4. Confirma duas vezes.
-#   5. Renomeia subvol @ atual pra @.broken.<timestamp> (reversível).
-#   6. Cria novo @ como snapshot writable da escolhida.
-#   7. Oferece chroot guiado pra regenerar UKI e re-assinar com sbctl.
+# Flow:
+#   1. Detect LUKS partition, prompt for passphrase (or reuse an open mapper).
+#   2. Mount btrfs at subvolid=5 (read-write).
+#   3. List snapshots; pick a number.
+#   4. Double-confirm.
+#   5. Rename the current @ subvol to @.broken.<timestamp> (reversible).
+#   6. Create a new @ as a writable snapshot of the chosen one.
+#   7. Offer a guided chroot to regenerate the UKI and re-sign with sbctl.
 
 set -euo pipefail
 
@@ -31,19 +31,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { echo "ERRO: $*" >&2; exit 1; }
+die() { echo "ERROR: $*" >&2; exit 1; }
 ok()  { echo "  ✓ $*"; }
 step(){ echo; echo "==> $*"; }
 
 require_root() {
-    [[ $EUID -eq 0 ]] || die "precisa rodar como root (sudo)."
+    [[ $EUID -eq 0 ]] || die "must run as root (use sudo)."
 }
 
 refuse_if_on_target() {
     local running_uuid="$1" target_uuid="$2"
     if [[ "$running_uuid" == "$target_uuid" ]]; then
-        die "você está rodando no MESMO btrfs que tenta recuperar.
-      Use o live USB do CachyOS."
+        die "you are running on the SAME btrfs you're trying to recover.
+      Boot from the CachyOS live USB."
     fi
 }
 
@@ -53,14 +53,14 @@ find_luks_device() {
         devs+=("$line")
     done < <(lsblk -ndo PATH,FSTYPE | awk '$2=="crypto_LUKS" {print $1}')
     case ${#devs[@]} in
-        0) die "nenhuma partição crypto_LUKS encontrada." ;;
+        0) die "no crypto_LUKS partition found." ;;
         1) echo "${devs[0]}" ;;
         *)
-            echo "Múltiplas partições LUKS:" >&2
+            echo "Multiple LUKS partitions found:" >&2
             local i=0
             for d in "${devs[@]}"; do echo "  [$i] $d" >&2; ((i++)) || true; done
-            read -rp "Índice: " idx
-            [[ "$idx" =~ ^[0-9]+$ ]] && (( idx < ${#devs[@]} )) || die "índice inválido."
+            read -rp "Index: " idx
+            [[ "$idx" =~ ^[0-9]+$ ]] && (( idx < ${#devs[@]} )) || die "invalid index."
             echo "${devs[$idx]}"
             ;;
     esac
@@ -76,24 +76,24 @@ reuse_or_open_luks() {
         if [[ "$backing" == "$dev" ]]; then
             LUKS_MAPPER="$name"
             LUKS_OPENED_BY_US="no"
-            ok "LUKS já aberto em /dev/mapper/$LUKS_MAPPER"
+            ok "LUKS already open at /dev/mapper/$LUKS_MAPPER"
             return
         fi
     done
     LUKS_MAPPER="cachyos-recover-$$"
     cryptsetup luksOpen "$dev" "$LUKS_MAPPER"
     LUKS_OPENED_BY_US="yes"
-    ok "LUKS aberto em /dev/mapper/$LUKS_MAPPER"
+    ok "LUKS opened at /dev/mapper/$LUKS_MAPPER"
 }
 
 mount_btrfs_root_rw() {
     mkdir -p "$MOUNT_POINT"
     mount -o subvolid=5,rw "/dev/mapper/$LUKS_MAPPER" "$MOUNT_POINT"
-    ok "btrfs montado em $MOUNT_POINT (subvolid=5, rw)"
+    ok "btrfs mounted at $MOUNT_POINT (subvolid=5, rw)"
 }
 
 detect_layout() {
-    # Retorna via globals: SNAPSHOTS_DIR (fs path), SNAPSHOTS_REL (relativo ao root fs)
+    # Sets globals: SNAPSHOTS_DIR (absolute path), SNAPSHOTS_REL (fs-relative)
     for candidate in "@/.snapshots" "@.snapshots"; do
         if [[ -d "$MOUNT_POINT/$candidate" ]]; then
             SNAPSHOTS_DIR="$MOUNT_POINT/$candidate"
@@ -101,7 +101,7 @@ detect_layout() {
             return
         fi
     done
-    die "diretório .snapshots não encontrado."
+    die ".snapshots directory not found."
 }
 
 extract_tag() { grep -oP "(?<=<$2>)[^<]+" "$1" 2>/dev/null | head -n1 || true; }
@@ -119,7 +119,7 @@ list_snapshots_table() {
         : "${num:=?}" "${date:=?}" "${type:=?}" "${cleanup:=-}" "${desc:=-}"
         rows+=("$(printf '%d\t%s\t%s\t%s\t%s' "$num" "$date" "$type" "$cleanup" "$desc")")
     done
-    [[ ${#rows[@]} -gt 0 ]] || die "nenhum snapshot encontrado."
+    [[ ${#rows[@]} -gt 0 ]] || die "no snapshots found."
     {
         printf 'NUM\tDATE\tTYPE\tCLEANUP\tDESCRIPTION\n'
         printf '%s\n' "${rows[@]}" | sort -n
@@ -128,10 +128,10 @@ list_snapshots_table() {
 
 pick_snapshot() {
     local num
-    read -rp "Número da snapshot pra restaurar: " num
-    [[ "$num" =~ ^[0-9]+$ ]] || die "número inválido."
+    read -rp "Snapshot number to restore: " num
+    [[ "$num" =~ ^[0-9]+$ ]] || die "invalid number."
     local snap="$SNAPSHOTS_DIR/$num/snapshot"
-    [[ -d "$snap" ]] || die "snapshot $num não existe em $SNAPSHOTS_DIR"
+    [[ -d "$snap" ]] || die "snapshot $num does not exist under $SNAPSHOTS_DIR"
     echo "$num"
 }
 
@@ -139,17 +139,17 @@ confirm_rollback() {
     local num="$1"
     local info="$SNAPSHOTS_DIR/$num/info.xml"
     echo
-    echo "Você escolheu snapshot #$num:"
-    echo "  data: $(extract_tag "$info" date | sed 's/T/ /')"
+    echo "You picked snapshot #$num:"
+    echo "  date: $(extract_tag "$info" date | sed 's/T/ /')"
     echo "  desc: $(extract_tag "$info" description)"
     echo
-    echo "Ações que serão executadas:"
-    echo "  1. renomear $MOUNT_POINT/@  →  $MOUNT_POINT/@.broken.$(date +%Y%m%d-%H%M%S)"
-    echo "  2. criar novo $MOUNT_POINT/@ como snapshot writable de #$num"
-    echo "  3. abrir chroot pra regenerar UKI + re-assinar"
+    echo "Actions that will be performed:"
+    echo "  1. rename $MOUNT_POINT/@  →  $MOUNT_POINT/@.broken.$(date +%Y%m%d-%H%M%S)"
+    echo "  2. create new $MOUNT_POINT/@ as a writable snapshot of #$num"
+    echo "  3. open a chroot for regenerating the UKI and re-signing"
     echo
-    read -rp "Confirma? digite o número da snapshot novamente: " confirm
-    [[ "$confirm" == "$num" ]] || die "confirmação não bate. Abortado."
+    read -rp "Confirm? type the snapshot number again: " confirm
+    [[ "$confirm" == "$num" ]] || die "confirmation mismatch. Aborted."
 }
 
 do_rollback() {
@@ -163,41 +163,41 @@ do_rollback() {
     ok "@ → $broken_name"
 
     btrfs subvolume snapshot "$SNAPSHOTS_DIR/$num/snapshot" "$MOUNT_POINT/@" >/dev/null
-    ok "@ novo criado a partir da snapshot #$num"
+    ok "new @ created from snapshot #$num"
     echo
-    echo "Rollback no filesystem está feito. Subvol antigo preservado em $broken_name"
-    echo "(pode deletar depois com: btrfs subvolume delete $MOUNT_POINT/$broken_name)"
+    echo "Filesystem rollback done. Old subvol preserved at $broken_name"
+    echo "(you can delete it later with: btrfs subvolume delete $MOUNT_POINT/$broken_name)"
 }
 
 setup_chroot() {
-    step "Preparando chroot em $MOUNT_POINT"
-    # Desmonta subvolid=5 e remonta com @ direto
+    step "Preparing chroot at $MOUNT_POINT"
+    # Remount using subvol=@ (current root subvol) so paths line up for chroot
     umount "$MOUNT_POINT"
     mount -o subvol=@ "/dev/mapper/$LUKS_MAPPER" "$MOUNT_POINT"
-    ok "montado subvol=@ em $MOUNT_POINT"
+    ok "mounted subvol=@ at $MOUNT_POINT"
 
-    # Descobre a partição ESP automaticamente (fstab do sistema restaurado)
+    # Find the ESP from the restored fstab
     local esp_uuid
     esp_uuid=$(awk '$2=="/boot" && $3=="vfat" {for(i=1;i<=NF;i++)if($i~/UUID=/){split($i,a,"=");print a[2];exit}}' "$MOUNT_POINT/etc/fstab")
     local esp_dev
     esp_dev=$(blkid -U "$esp_uuid" 2>/dev/null || true)
     if [[ -n "$esp_dev" ]]; then
         mount "$esp_dev" "$MOUNT_POINT/boot"
-        ok "ESP ($esp_dev) montada em /boot"
+        ok "ESP ($esp_dev) mounted at /boot"
     else
-        echo "  ⚠ não consegui detectar ESP pelo fstab; monte manualmente dentro do chroot."
+        echo "  ⚠ could not auto-detect ESP from fstab; mount it manually inside the chroot."
     fi
 
-    # Subvols auxiliares (melhor UX no chroot, alguns são opcionais)
+    # Auxiliary subvols — nice-to-have for a smoother chroot
     for pair in "home:@home" "var/log:@log" "var/cache:@cache" "var/tmp:@tmp" "srv:@srv" "root:@root"; do
         local mp="${pair%%:*}" subvol="${pair##*:}"
         if [[ -d "$MOUNT_POINT/$mp" ]]; then
             mount -o subvol="$subvol" "/dev/mapper/$LUKS_MAPPER" "$MOUNT_POINT/$mp" 2>/dev/null && \
-                ok "mounted subvol=$subvol em /$mp" || true
+                ok "mounted subvol=$subvol at /$mp" || true
         fi
     done
 
-    # Virtual fs pro chroot
+    # Virtual filesystems for chroot
     mount --bind /dev "$MOUNT_POINT/dev"
     mount --bind /dev/pts "$MOUNT_POINT/dev/pts"
     mount -t proc proc "$MOUNT_POINT/proc"
@@ -206,33 +206,33 @@ setup_chroot() {
     if [[ -d /sys/firmware/efi/efivars ]]; then
         mount --bind /sys/firmware/efi/efivars "$MOUNT_POINT/sys/firmware/efi/efivars" 2>/dev/null || true
     fi
-    ok "virtual fs mounted"
+    ok "virtual filesystems mounted"
 }
 
 enter_chroot() {
-    step "Entrando no chroot"
+    step "Entering chroot"
     cat <<'EOF'
 
-  ┌─ Dentro do chroot, rode os passos abaixo na ordem: ──────────────┐
+  ┌─ Inside the chroot, run the steps below in order: ───────────────┐
   │                                                                   │
-  │   # 1. Regenerar initramfs e (se configurado) UKI                 │
+  │   # 1. Regenerate initramfs (and UKI, if configured)              │
   │   mkinitcpio -P                                                   │
   │                                                                   │
-  │   # 2. Re-assinar binários da cadeia de boot                      │
+  │   # 2. Re-sign boot chain binaries                                │
   │   sbctl sign-all -g                                               │
   │   sbctl verify                                                    │
   │                                                                   │
-  │   # 3. Se usar systemd-boot, atualizar binário:                   │
+  │   # 3. If using systemd-boot, update its binary:                  │
   │   bootctl update                                                  │
   │   sbctl sign -s /boot/EFI/systemd/systemd-bootx64.efi             │
   │   sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI                        │
   │                                                                   │
-  │   # 4. Se usar Limine, atualizar binário:                         │
+  │   # 4. If using Limine, update its binary:                        │
   │   limine-update                                                   │
   │   sbctl sign -s /boot/EFI/limine/limine_x64.efi                   │
   │   sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI                        │
   │                                                                   │
-  │   # 5. Sair — a limpeza é automática.                             │
+  │   # 5. Exit — cleanup happens automatically.                      │
   │   exit                                                            │
   │                                                                   │
   └───────────────────────────────────────────────────────────────────┘
@@ -244,7 +244,7 @@ EOF
 main() {
     require_root
 
-    step "Detecção"
+    step "Detection"
     local luks_dev target_uuid running_uuid
     luks_dev=$(find_luks_device)
     ok "LUKS device: $luks_dev"
@@ -259,7 +259,7 @@ main() {
     detect_layout
     ok "layout: $SNAPSHOTS_REL"
 
-    step "Snapshots disponíveis"
+    step "Available snapshots"
     list_snapshots_table
 
     echo
@@ -272,9 +272,9 @@ main() {
     enter_chroot
 
     step "Done"
-    echo "  Reinicie pra testar o sistema restaurado."
-    echo "  Se der problema: volte ao live USB, monte subvolid=5,"
-    echo "  apague o @ novo e renomeie @.broken.<ts> de volta pra @."
+    echo "  Reboot to test the restored system."
+    echo "  If something breaks: boot back into the live USB, mount subvolid=5,"
+    echo "  delete the new @, and rename @.broken.<ts> back to @."
 }
 
 main "$@"

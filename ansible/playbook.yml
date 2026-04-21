@@ -35,5 +35,5 @@
     - name: Show invocation hints
       ansible.builtin.debug:
         msg:
-          - "Listar: sudo cachyos-list-snapshots"
-          - "Recuperar (só de live USB): sudo cachyos-recover"
+          - "List snapshots: sudo cachyos-list-snapshots"
+          - "Recover (live USB only): sudo cachyos-recover"
