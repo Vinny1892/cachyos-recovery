@@ -4,8 +4,9 @@
   become: true
   vars:
     install_dir: /usr/local/bin
-    script_src: "{{ playbook_dir }}/../scripts/list-snapshots.sh"
-    script_dest: "{{ install_dir }}/cachyos-list-snapshots"
+    scripts:
+      - { src: list-snapshots.sh, dest: cachyos-list-snapshots }
+      - { src: recover.sh,        dest: cachyos-recover }
 
   tasks:
     - name: Ensure install directory exists
@@ -14,15 +15,16 @@
         state: directory
         mode: '0755'
 
-    - name: Deploy list-snapshots script
+    - name: Deploy recovery scripts
       ansible.builtin.copy:
-        src: "{{ script_src }}"
-        dest: "{{ script_dest }}"
+        src: "{{ playbook_dir }}/../scripts/{{ item.src }}"
+        dest: "{{ install_dir }}/{{ item.dest }}"
         mode: '0755'
         owner: root
         group: root
+      loop: "{{ scripts }}"
 
-    - name: Verify required tools are installed
+    - name: Ensure required tools are installed
       ansible.builtin.package:
         name:
           - cryptsetup
@@ -30,6 +32,8 @@
           - util-linux
         state: present
 
-    - name: Show invocation hint
+    - name: Show invocation hints
       ansible.builtin.debug:
-        msg: "Rode com: sudo {{ script_dest | basename }}"
+        msg:
+          - "Listar: sudo cachyos-list-snapshots"
+          - "Recuperar (só de live USB): sudo cachyos-recover"

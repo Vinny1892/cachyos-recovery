@@ -5,7 +5,8 @@ Ferramentas de recuperação pra instalações CachyOS com LUKS + Btrfs + snappe
 ## O que tem
 
 - `scripts/list-snapshots.sh` — lista snapshots Btrfs (funciona em live USB ou no sistema rodando). Somente leitura.
-- `ansible/playbook.yml` — instala o script em `/usr/local/bin/cachyos-list-snapshots`.
+- `scripts/recover.sh` — rollback guiado pra uma snapshot + chroot com passos de regeneração de UKI/re-assinatura. **Só funciona de live USB** (recusa rodar no próprio sistema).
+- `ansible/playbook.yml` — instala os dois em `/usr/local/bin/` como `cachyos-list-snapshots` e `cachyos-recover`.
 
 ## Uso rápido
 
@@ -16,6 +17,33 @@ ansible-playbook -i inventory.yml playbook.yml --ask-become-pass
 
 # Roda
 sudo cachyos-list-snapshots
+```
+
+## Recovery (somente de live USB)
+
+```sh
+# No live USB, com este repo acessível:
+sudo bash scripts/recover.sh
+```
+
+O script:
+
+1. Detecta a partição LUKS e abre (ou reusa mapper já aberto).
+2. Recusa rodar se o btrfs em questão é o mesmo do sistema vivo.
+3. Monta `subvolid=5` (RW), lista snapshots, pede o número.
+4. Pede confirmação dupla (digitar o número de novo).
+5. Renomeia `@ → @.broken.<timestamp>` (preserva, reversível).
+6. Cria novo `@` como snapshot writable da escolhida.
+7. Monta ESP + subvols auxiliares e abre chroot com instruções na MOTD.
+
+Saída do chroot faz cleanup automático (umount + luksClose).
+
+**Undo**: se algo der errado depois, boot no live USB e:
+
+```sh
+mount -o subvolid=5 /dev/mapper/<luks> /mnt
+btrfs subvolume delete /mnt/@
+mv /mnt/@.broken.<timestamp> /mnt/@
 ```
 
 ## Uso em live USB (sem instalar)
