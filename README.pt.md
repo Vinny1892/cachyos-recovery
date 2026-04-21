@@ -21,14 +21,50 @@ ansible-playbook -i inventory.yml playbook.yml --ask-become-pass
 sudo cachyos-list-snapshots
 ```
 
-## Recovery (somente de live USB)
+## Fluxo completo de recovery (só via live USB)
 
 ```sh
-# No live USB, com este repo acessível:
+# 1. Boot pelo live USB do CachyOS. Clona ou copia este repo pro live.
+
+# 2. Descobre qual snapshot você quer restaurar:
+sudo bash scripts/list-snapshots.sh
+```
+
+Saída esperada:
+
+```
+LUKS device: /dev/nvme0n1p2
+Snapshots at: /mnt/cachyos-snaps-ro/@/.snapshots
+
+NUM  DATE                 TYPE    CLEANUP   DESCRIPTION
+1    2026-04-20 14:30:12  single  number    first root
+2    2026-04-20 15:17:42  pre     number    pacman -S docker
+3    2026-04-20 15:17:45  post    number    pacman -S docker
+...
+```
+
+Anota o `NUM` da snapshot que você quer (ex: `2`).
+
+```sh
+# 3. Roda o rollback guiado:
 sudo bash scripts/recover.sh
 ```
 
-O script:
+O `recover.sh` vai listar as snapshots de novo e perguntar:
+
+```
+Snapshot number to restore: 2         ← digita o NUM do passo 2
+Confirm? type the snapshot number again: 2
+```
+
+Ele faz o rollback, monta o chroot e mostra uma MOTD com os comandos pra regenerar initramfs/UKI e re-assinar com sbctl. Roda na ordem e depois `exit`.
+
+```sh
+# 4. Reboot no sistema restaurado.
+reboot
+```
+
+### O que o `recover.sh` faz por dentro
 
 1. Detecta a partição LUKS e abre (ou reusa mapper já aberto).
 2. Recusa rodar se o btrfs em questão é o mesmo do sistema vivo.
@@ -46,23 +82,4 @@ Saída do chroot faz cleanup automático (umount + luksClose).
 mount -o subvolid=5 /dev/mapper/<luks> /mnt
 btrfs subvolume delete /mnt/@
 mv /mnt/@.broken.<timestamp> /mnt/@
-```
-
-## Uso em live USB (sem instalar)
-
-1. Boot pelo live USB do CachyOS.
-2. Copia ou baixa o script.
-3. `sudo bash list-snapshots.sh`
-
-Saída esperada:
-
-```
-LUKS device: /dev/nvme0n1p2
-Snapshots em: /mnt/cachyos-snaps-ro/@/.snapshots
-
-NUM  DATE                 TYPE    CLEANUP   DESCRIPTION
-1    2026-04-20 14:30:12  single  number    first root
-2    2026-04-20 15:17:42  pre     number    pacman -S docker
-3    2026-04-20 15:17:45  post    number    pacman -S docker
-...
 ```

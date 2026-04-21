@@ -21,11 +21,14 @@ ansible-playbook -i inventory.yml playbook.yml --ask-become-pass
 sudo cachyos-list-snapshots
 ```
 
-## Usage from a live USB (no install)
+## End-to-end recovery flow (live USB only)
 
-1. Boot the CachyOS live USB.
-2. Copy or download the script.
-3. `sudo bash list-snapshots.sh`
+```sh
+# 1. Boot the CachyOS live USB. Clone or copy this repo onto it.
+
+# 2. Discover which snapshot you want to restore:
+sudo bash scripts/list-snapshots.sh
+```
 
 Expected output:
 
@@ -40,14 +43,28 @@ NUM  DATE                 TYPE    CLEANUP   DESCRIPTION
 ...
 ```
 
-## Recovery (live USB only)
+Note the `NUM` of the snapshot you want (e.g. `2`).
 
 ```sh
-# On the live USB, with this repo available:
+# 3. Run the guided rollback:
 sudo bash scripts/recover.sh
 ```
 
-The script:
+`recover.sh` will list snapshots again and prompt:
+
+```
+Snapshot number to restore: 2         ← type the NUM from step 2
+Confirm? type the snapshot number again: 2
+```
+
+Then it performs the rollback, sets up a chroot, and shows a MOTD with the commands to regenerate the initramfs/UKI and re-sign with sbctl. Run them in order, then `exit`.
+
+```sh
+# 4. Reboot into the restored system.
+reboot
+```
+
+### What `recover.sh` does internally
 
 1. Detects the LUKS partition and opens it (or reuses an already-open mapper).
 2. Refuses to run if the target Btrfs is the same filesystem backing the running system.
